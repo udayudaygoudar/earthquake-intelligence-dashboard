@@ -1,0 +1,130 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Earthquake Intelligence Dashboard</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#f1f5f9;color:#172033}
+header{background:#13243a;color:white;padding:28px 6%}
+header h1{margin:0 0 8px;font-size:27px}
+header p{margin:0;color:#cbd5e1}
+main{max-width:1150px;margin:28px auto;padding:0 18px}
+.toolbar,.panel,.stat{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:18px}
+.toolbar{display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:18px}
+label{display:block;font-size:13px;margin-bottom:7px;font-weight:bold}
+input,select,button{padding:10px;border:1px solid #cbd5e1;border-radius:7px;font-size:14px}
+button{background:#1765c0;color:white;border:0;cursor:pointer;font-weight:bold}
+button:disabled{opacity:.6}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:18px}
+.stat span{font-size:13px;color:#64748b}
+.stat h2{font-size:27px;margin:12px 0 4px}
+.panel{margin-bottom:18px;overflow-x:auto}
+.panel h2{font-size:18px;margin-top:0}
+table{width:100%;border-collapse:collapse;min-width:650px}
+th,td{text-align:left;padding:12px 10px;border-bottom:1px solid #e2e8f0;font-size:13px}
+th{background:#f8fafc}
+a{color:#1765c0}
+#status{font-size:14px;color:#475569;margin:14px 0}
+.barrow{display:grid;grid-template-columns:110px 1fr 45px;gap:10px;align-items:center;margin:13px 0;font-size:13px}
+.bar{height:15px;background:#e2e8f0;border-radius:5px;overflow:hidden}
+.fill{height:100%;background:#2876d1}
+footer{text-align:center;padding:22px;color:#64748b;font-size:12px}
+@media(max-width:650px){.stats{grid-template-columns:1fr}.toolbar>*{width:100%}}
+</style>
+</head>
+<body>
+<header>
+<h1>Earthquake Intelligence Dashboard</h1>
+<p>Recent seismic activity | Data source: USGS Earthquake API</p>
+</header>
+<main>
+<section class="toolbar">
+<div><label for="start">Start date</label><input id="start" type="date"></div>
+<div><label for="end">End date</label><input id="end" type="date"></div>
+<div><label for="mag">Minimum magnitude</label>
+<select id="mag">
+<option value="0">All magnitudes</option>
+<option value="2.5" selected>2.5 and above</option>
+<option value="4">4.0 and above</option>
+<option value="5">5.0 and above</option>
+</select></div>
+<button id="load" onclick="loadData()">Load earthquakes</button>
+</section>
+<div id="status" role="status">Ready to retrieve earthquake data.</div>
+<section class="stats">
+<div class="stat"><span>Earthquakes returned</span><h2 id="total">—</h2><span>Within selected filters</span></div>
+<div class="stat"><span>Largest magnitude</span><h2 id="largest">—</h2><span>Among returned events</span></div>
+<div class="stat"><span>Average magnitude</span><h2 id="average">—</h2><span>Among returned events</span></div>
+</section>
+<section class="panel">
+<h2>Magnitude distribution</h2>
+<div id="chart">Load data to view the distribution.</div>
+</section>
+<section class="panel">
+<h2>Recent earthquake events</h2>
+<table>
+<thead><tr><th>Magnitude</th><th>Location</th><th>Date and time (UTC)</th><th>Depth (km)</th><th>Details</th></tr></thead>
+<tbody id="events"><tr><td colspan="5">No data loaded yet.</td></tr></tbody>
+</table>
+</section>
+<p style="font-size:12px;color:#64748b">Source: United States Geological Survey (USGS). Times are displayed in UTC. Results are limited to 100 events per request.</p>
+</main>
+<footer>Earthquake Dashboard | Built with HTML, CSS, JavaScript and the USGS API</footer>
+<script>
+const $ = id => document.getElementById(id);
+const today = new Date();
+const endDate = today.toISOString().slice(0,10);
+const startDate = new Date(today.getTime()-6*86400000).toISOString().slice(0,10);
+$("start").value = startDate;
+$("end").value = endDate;
+
+async function loadData(){
+  const start=$("start").value;
+  const end=$("end").value;
+  if(!start||!end||start>end){
+    $("status").textContent="Please select a valid date range.";
+    return;
+  }
+  const button=$("load");
+  button.disabled=true;
+  $("status").textContent="Connecting to the USGS API...";
+  $("events").innerHTML="<tr><td colspan='5'>Loading...</td></tr>";
+  try{
+    const params=new URLSearchParams({
+      format:"geojson",starttime:start,endtime:end,
+      minmagnitude:$("mag").value,limit:"100",orderby:"time"
+    });
+    const response=await fetch("https://earthquake.usgs.gov/fdsnws/event/1/query?"+params);
+    if(!response.ok) throw new Error("USGS returned HTTP "+response.status);
+    const data=await response.json();
+    const events=data.features||[];
+    const valid=events.filter(e=>Number.isFinite(e.properties.mag));
+    $("total").textContent=events.length;
+    $("largest").textContent=valid.length?Math.max(...valid.map(e=>e.properties.mag)).toFixed(1):"N/A";
+    $("average").textContent=valid.length?(valid.reduce((s,e)=>s+e.properties.mag,0)/valid.length).toFixed(2):"N/A";
+    $("status").textContent="Success: HTTP "+response.status+". Showing "+events.length+" events returned by USGS. The request is limited to 100 records.";
+    $("events").innerHTML=events.length?events.map(e=>{
+      const p=e.properties;
+      const c=e.geometry?.coordinates||[];
+      const time=p.time?new Date(p.time).toISOString().replace("T"," ").slice(0,19):"N/A";
+      return "<tr><td>"+(p.mag??"N/A")+"</td><td>"+escapeHTML(p.place||"Unknown")+"</td><td>"+time+"</td><td>"+(c[2]??"N/A")+"</td><td><a href='"+p.url+"' target='_blank' rel='noopener'>Open event</a></td></tr>";
+    }).join(""):"<tr><td colspan='5'>No events matched these filters.</td></tr>";
+    const ranges=[["Below 3",0,3],["3 to 3.9",3,4],["4 to 4.9",4,5],["5 to 5.9",5,6],["6 and above",6,Infinity]];
+    const counts=ranges.map(r=>events.filter(e=>e.properties.mag!=null&&e.properties.mag>=r[1]&&e.properties.mag<r[2]).length);
+    const maxCount=Math.max(1,...counts);
+    $("chart").innerHTML=ranges.map((r,i)=>"<div class='barrow'><span>"+r[0]+"</span><div class='bar'><div class='fill' style='width:"+(counts[i]/maxCount*100)+"%'></div></div><span>"+counts[i]+"</span></div>").join("");
+  }catch(error){
+    $("status").textContent="Could not load data: "+error.message+". Check your internet connection and try again.";
+    $("events").innerHTML="<tr><td colspan='5'>Data unavailable. Please retry.</td></tr>";
+  }finally{button.disabled=false;}
+}
+function escapeHTML(value){
+  return String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+loadData();
+</script>
+</body>
+</html>
